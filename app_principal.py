@@ -18,7 +18,7 @@ CONFIG_FILE = 'config_cols.json'
 PERSISTENCE_FILE = 'datos_maestro.csv' 
 IMAGE_FOLDER = 'imagenes_persistentes' 
 
-# Función para cargar la configuración de columnas (con UTF-8)
+# Función para cargar la configuración de columnas
 def load_config():
     """Carga la configuración actual desde el archivo JSON, usando UTF-8."""
     if os.path.exists(CONFIG_FILE):
@@ -51,7 +51,8 @@ ENCABEZADOS.append('OBSERVACIONES')
 COLUMNAS_FINALES = ENCABEZADOS + COLUMNAS_IMAGEN
 
 # --- 2. Constantes de Formato para Excel ---
-ALTURA_FILA_PT = 75 
+ALTURA_ENCABEZADO_PT = 60  # 💥 100 PÍXELES (Aproximadamente 60 puntos)
+ALTURA_FILA_DATOS_PT = 75  # 124 píxeles para las fotos
 ANCHO_COLUMNA_NORMAL_UNITS = 14 
 ANCHO_COLUMNA_OBSERVACIONES_UNITS = 28 
 IMAGEN_WIDTH = 100 
@@ -95,12 +96,14 @@ def generar_excel_con_formato(df):
     wb = load_workbook(output)
     ws = wb.active 
     
-    # Aplicar formatos de celda y fila
-    ws.row_dimensions[1].height = 30 
+    # APLICAR ALTO DE 100 PX (60 PUNTOS) A LA FILA 1
+    ws.row_dimensions[1].height = ALTURA_ENCABEZADO_PT
+    
     for row_index in range(1, len(df) + 2):
         fila_excel_obj = ws[row_index]
+        # Aplicamos el alto estándar de las filas de DATOS (124px)
         if row_index > 1:
-            ws.row_dimensions[row_index].height = ALTURA_FILA_PT
+            ws.row_dimensions[row_index].height = ALTURA_FILA_DATOS_PT
             
         for col_idx_0based in range(len(ENCABEZADOS)): 
             celda = fila_excel_obj[col_idx_0based]
@@ -198,7 +201,6 @@ def guardar_registro_y_limpiar(modelo, serie, condiciones, observaciones, fotos)
         if uploaded_file is not None:
             file_extension = uploaded_file.name.split('.')[-1]
             timestamp = pd.Timestamp.now().strftime("%Y%m%d%H%M%S")
-            # Nombre de archivo único
             filename = f"{modelo.replace(' ', '_')}_{serie.replace(' ', '_')}_{k.replace(' ', '_')}_{timestamp}.{file_extension}"
             ruta_guardado = os.path.join(IMAGE_FOLDER, filename)
             
@@ -223,7 +225,6 @@ def guardar_registro_y_limpiar(modelo, serie, condiciones, observaciones, fotos)
     # Persistencia: Guardar el registro a un archivo CSV (texto + rutas)
     try:
         df_actual = pd.DataFrame(st.session_state['datos_ingresados'])
-        # Aseguramos que solo guardamos las columnas que existen
         df_actual[[c for c in COLUMNAS_FINALES if c in df_actual.columns]].to_csv(PERSISTENCE_FILE, index=False)
     except Exception as e:
         st.warning(f"Advertencia: No se pudo guardar el archivo de persistencia CSV. Error: {e}")
@@ -263,12 +264,10 @@ def main():
     except Exception:
         st.title("📋 Generador de Reporte de Inspección")
     
-    # 💥 INSERCIÓN DEL BOTÓN DE ACCESO A ADMINISTRACIÓN 💥
+    # INSERCIÓN DEL BOTÓN DE ACCESO A ADMINISTRACIÓN
     st.markdown("---") 
     
     if st.button("⚙️ Editar Formato de Columnas (Administración)", type="secondary"):
-        # Esto fuerza la navegación a la URL del archivo admin_columnas.py
-        # Nota: La URL debe ser la versión limpia del nombre del archivo de la carpeta pages
         st.write("<meta http-equiv='refresh' content='0; url=admin_columnas'>", unsafe_allow_html=True)
         
     st.markdown("---")
