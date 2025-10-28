@@ -10,6 +10,7 @@ from openpyxl.styles import Alignment, PatternFill, Font
 from io import BytesIO
 from PIL import Image
 from PIL.ExifTags import TAGS
+import gc # Mantenemos el Garbage Collector para limpieza de RAM
 
 # ----------------------------------------------------
 # CONFIGURACIÓN DINÁMICA Y PERSISTENCIA
@@ -20,19 +21,16 @@ IMAGE_FOLDER = 'imagenes_persistentes'
 
 # Función para cargar la configuración de columnas
 def load_config():
-    """Carga la configuración actual desde el archivo JSON, usando UTF-8."""
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f: 
                 return json.load(f)
         except Exception as e:
             st.error(f"Error al leer config_cols.json (usando UTF-8). Por favor, verifique el formato del archivo. Error: {e}")
-            # Configuración de emergencia si falla la lectura
             return {
-                "CONDICIONES_INSPECCION": ["DAÑO EN EMPAQUE", "DAÑO FISICO", "ACCESORIOS COMPLETOS"],
-                "COLUMNAS_IMAGEN": ["FOTO DE SERIE", "FOTO DEL EMPAQUE"]
+                "CONDICIONES_INSPECCION": ["DAÑO EN EMPAQUE", "DAÑO FISICO", "ACCESORIOS COMPLETOS", "PARILLA EN MAL ESTADO", "PRESENTA RESTOS METALICOS (VIRUTAS)", "TAPAS PRESENTAN OXIDO", "PRESENTA RAYAS", "TARJETA DE GARANTÍA", "TIENE ETIQUETA DE EFICIENCIA ENERGETICA"],
+                "COLUMNAS_IMAGEN": ["FOTO DE SERIE", "FOTO DEL EMPAQUE", "FOTO DE PRODUCTO COMPLETO", "FOTO PARTE TRASERA", "FOTO DE OBSERVACIONES A 50 CM (VIRUTAS)", "FOTO DE OBSERVACIONES CERCA (VIRUTAS)", "FOTO DE OBSERVACIONES A 50 CM (OXIDO EN TAPILLAS)", "FOTO DE OBSERVACIONES CERCA (OXIDO EN TAPILLAS)", "FOTO DE OBSERVACIONES A 50 CM (MANCHAS)", "FOTO DE OBSERVACIONES CERCA (MANCHAS)", "FOTO DE OBSERVACIONES A 50 CM (RAYAS)", "FOTO DE OBSERVACIONES CERCA (RAYAS)", "FOTO DE ACCESORIOS"]
             }
-    # Si el archivo no existe, retorna una configuración por defecto
     return {
         "CONDICIONES_INSPECCION": ["DAÑO EN EMPAQUE", "DAÑO FISICO", "ACCESORIOS COMPLETOS", "PARILLA EN MAL ESTADO", "PRESENTA RESTOS METALICOS (VIRUTAS)", "TAPAS PRESENTAN OXIDO", "PRESENTA RAYAS", "TARJETA DE GARANTÍA", "TIENE ETIQUETA DE EFICIENCIA ENERGETICA"],
         "COLUMNAS_IMAGEN": ["FOTO DE SERIE", "FOTO DEL EMPAQUE", "FOTO DE PRODUCTO COMPLETO", "FOTO PARTE TRASERA", "FOTO DE OBSERVACIONES A 50 CM (VIRUTAS)", "FOTO DE OBSERVACIONES CERCA (VIRUTAS)", "FOTO DE OBSERVACIONES A 50 CM (OXIDO EN TAPILLAS)", "FOTO DE OBSERVACIONES CERCA (OXIDO EN TAPILLAS)", "FOTO DE OBSERVACIONES A 50 CM (MANCHAS)", "FOTO DE OBSERVACIONES CERCA (MANCHAS)", "FOTO DE OBSERVACIONES A 50 CM (RAYAS)", "FOTO DE OBSERVACIONES CERCA (RAYAS)", "FOTO DE ACCESORIOS"]
@@ -51,12 +49,12 @@ ENCABEZADOS.append('OBSERVACIONES')
 COLUMNAS_FINALES = ENCABEZADOS + COLUMNAS_IMAGEN
 
 # --- 2. Constantes de Formato para Excel ---
-ALTURA_ENCABEZADO_PT = 60  # 💥 100 PÍXELES (Aproximadamente 60 puntos)
-ALTURA_FILA_DATOS_PT = 75  # 124 píxeles para las fotos
+ALTURA_ENCABEZADO_PT = 60  
+ALTURA_FILA_DATOS_PT = 75  
 ANCHO_COLUMNA_NORMAL_UNITS = 14 
 ANCHO_COLUMNA_OBSERVACIONES_UNITS = 28 
-IMAGEN_WIDTH = 100 
-IMAGEN_HEIGHT = 100
+IMAGEN_WIDTH = 150 # Restauramos un tamaño decente para alta calidad
+IMAGEN_HEIGHT = 150 # Restauramos un tamaño decente para alta calidad
 ALINEACION_CENTRO = Alignment(horizontal='center', vertical='center', wrap_text=True)
 RELLENO_VERDE_AZULADO = PatternFill(start_color='20B2AA', end_color='20B2AA', fill_type='solid') 
 FUENTE_ENCABEZADO = Font(color='FFFFFF', bold=True) 
@@ -64,7 +62,6 @@ FUENTE_ENCABEZADO = Font(color='FFFFFF', bold=True)
 # --- 3. Funciones de Lógica y Persistencia ---
 
 def cargar_datos_persistentes():
-    """Carga los datos previamente guardados (incluyendo las rutas de las imágenes)."""
     if os.path.exists(PERSISTENCE_FILE):
         try:
             df = pd.read_csv(PERSISTENCE_FILE, dtype=str) 
@@ -84,7 +81,7 @@ def cargar_datos_persistentes():
     return []
 
 def generar_excel_con_formato(df):
-    """Genera el archivo Excel en memoria, leyendo las imágenes desde el disco."""
+    """Genera el archivo Excel en memoria, leyendo las imágenes desde el disco con MÁXIMA CALIDAD."""
     
     os.makedirs(IMAGE_FOLDER, exist_ok=True) 
 
@@ -96,12 +93,10 @@ def generar_excel_con_formato(df):
     wb = load_workbook(output)
     ws = wb.active 
     
-    # APLICAR ALTO DE 100 PX (60 PUNTOS) A LA FILA 1
     ws.row_dimensions[1].height = ALTURA_ENCABEZADO_PT
     
     for row_index in range(1, len(df) + 2):
         fila_excel_obj = ws[row_index]
-        # Aplicamos el alto estándar de las filas de DATOS (124px)
         if row_index > 1:
             ws.row_dimensions[row_index].height = ALTURA_FILA_DATOS_PT
             
@@ -127,7 +122,6 @@ def generar_excel_con_formato(df):
         
         for indice_columna, nombre_columna_foto in enumerate(COLUMNAS_IMAGEN):
             
-            # Corrección del TypeError: Forzar a string y verificar NaN/None
             imagen_ruta_guardada = fila_rutas[nombre_columna_foto]
             path_check = str(imagen_ruta_guardada).strip()
             es_path_valido = path_check and path_check.lower() != 'none' and path_check.lower() != 'nan'
@@ -161,24 +155,25 @@ def generar_excel_con_formato(df):
                     elif orientation == 6: img_pil = img_pil.rotate(-90, expand=True)
                     elif orientation == 8: img_pil = img_pil.rotate(90, expand=True)
 
+                    # No comprimimos, solo rotamos y guardamos el resultado
                     rotated_img_bytes = BytesIO()
-                    img_pil.save(rotated_img_bytes, format='PNG')
+                    img_pil.save(rotated_img_bytes, format='PNG') 
                     rotated_img_bytes.seek(0)
 
+                    # Insertar la imagen de alta calidad
                     img = OpenpyxlImage(rotated_img_bytes)
                     img.width = IMAGEN_WIDTH 
                     img.height = IMAGEN_HEIGHT
                     ws.add_image(img, f'{columna_letra}{fila_excel}')
+                    
+                    # Limpieza de Memoria
+                    del img_pil
+                    del rotated_img_bytes
+                    gc.collect() 
+
                 except Exception as e:
-                    st.warning(f"⚠️ Error al procesar imagen '{path_check}': {e}. Insertando sin rotación.")
-                    try:
-                        with open(path_check, 'rb') as f:
-                            img = OpenpyxlImage(f)
-                            img.width = IMAGEN_WIDTH 
-                            img.height = IMAGEN_HEIGHT
-                            ws.add_image(img, f'{columna_letra}{fila_excel}')
-                    except Exception as e2:
-                         st.error(f"❌ Error crítico al insertar imagen original: {e2}")
+                    st.error(f"❌ Error crítico al insertar imagen: {e}")
+                    # Ya que la calidad es importante, no incluimos la opción de baja calidad aquí
 
     final_output = BytesIO()
     wb.save(final_output)
@@ -328,7 +323,8 @@ def main():
         st.subheader(f"Registros Guardados ({len(st.session_state['datos_ingresados'])})")
         st.dataframe(df_preview[[c for c in ENCABEZADOS if c in df_preview.columns]], use_container_width=True, height=200)
 
-        excel_file = generar_excel_con_formato(df_preview)
+        # La función de generación se llama SOLO aquí (bajo demanda)
+        excel_file = generar_excel_con_formato(df_preview) 
         
         st.download_button(
             label="💾 Descargar Excel Final",
