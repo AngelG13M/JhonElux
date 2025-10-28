@@ -10,7 +10,7 @@ from openpyxl.styles import Alignment, PatternFill, Font
 from io import BytesIO
 from PIL import Image
 from PIL.ExifTags import TAGS
-import gc # Para ayudar con la gestión de memoria
+import gc 
 
 # ----------------------------------------------------
 # CONFIGURACIÓN DINÁMICA Y PERSISTENCIA
@@ -19,15 +19,14 @@ CONFIG_FILE = 'config_cols.json'
 PERSISTENCE_FILE = 'datos_maestro.csv' 
 IMAGE_FOLDER = 'imagenes_persistentes' 
 
-# Función para cargar la configuración de columnas
+# Función para cargar la configuración de columnas (sin cambios)
 def load_config():
-    """Carga la configuración actual desde el archivo JSON, usando UTF-8."""
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f: 
                 return json.load(f)
         except Exception as e:
-            st.error(f"Error al leer config_cols.json: {e}. Se cargará la configuración de emergencia.")
+            st.error(f"Error al leer config_cols.json (usando UTF-8). Por favor, verifique el formato del archivo. Error: {e}")
             return {
                 "CONDICIONES_INSPECCION": ["DAÑO EN EMPAQUE", "DAÑO FISICO", "ACCESORIOS COMPLETOS", "PARILLA EN MAL ESTADO", "PRESENTA RESTOS METALICOS (VIRUTAS)", "TAPAS PRESENTAN OXIDO", "PRESENTA RAYAS", "TARJETA DE GARANTÍA", "TIENE ETIQUETA DE EFICIENCIA ENERGETICA"],
                 "COLUMNAS_IMAGEN": ["FOTO DE SERIE", "FOTO DEL EMPAQUE", "FOTO DE PRODUCTO COMPLETO", "FOTO PARTE TRASERA", "FOTO DE OBSERVACIONES A 50 CM (VIRUTAS)", "FOTO DE OBSERVACIONES CERCA (VIRUTAS)", "FOTO DE OBSERVACIONES A 50 CM (OXIDO EN TAPILLAS)", "FOTO DE OBSERVACIONES CERCA (OXIDO EN TAPILLAS)", "FOTO DE OBSERVACIONES A 50 CM (MANCHAS)", "FOTO DE OBSERVACIONES CERCA (MANCHAS)", "FOTO DE OBSERVACIONES A 50 CM (RAYAS)", "FOTO DE OBSERVACIONES CERCA (RAYAS)", "FOTO DE ACCESORIOS"]
@@ -60,7 +59,7 @@ ALINEACION_CENTRO = Alignment(horizontal='center', vertical='center', wrap_text=
 RELLENO_VERDE_AZULADO = PatternFill(start_color='20B2AA', end_color='20B2AA', fill_type='solid') 
 FUENTE_ENCABEZADO = Font(color='FFFFFF', bold=True) 
 
-# --- 3. Funciones de Lógica y Persistencia ---
+# --- 3. Funciones de Lógica y Persistencia (Sin cambios, pero ahora se llama bajo demanda) ---
 
 def cargar_datos_persistentes():
     if os.path.exists(PERSISTENCE_FILE):
@@ -94,6 +93,7 @@ def generar_excel_con_formato(df):
     wb = load_workbook(output)
     ws = wb.active 
     
+    # Aplicar formatos de celda y fila
     ws.row_dimensions[1].height = ALTURA_ENCABEZADO_PT
     
     for row_index in range(1, len(df) + 2):
@@ -123,7 +123,6 @@ def generar_excel_con_formato(df):
         
         for indice_columna, nombre_columna_foto in enumerate(COLUMNAS_IMAGEN):
             
-            # Corrección del TypeError: Forzar a string y verificar NaN/None
             imagen_ruta_guardada = fila_rutas[nombre_columna_foto]
             path_check = str(imagen_ruta_guardada).strip()
             es_path_valido = path_check and path_check.lower() != 'none' and path_check.lower() != 'nan'
@@ -166,7 +165,6 @@ def generar_excel_con_formato(df):
                     img.height = IMAGEN_HEIGHT
                     ws.add_image(img, f'{columna_letra}{fila_excel}')
                     
-                    # Limpieza de Memoria
                     del img_pil
                     del rotated_img_bytes
                     gc.collect() 
@@ -188,7 +186,7 @@ def generar_excel_con_formato(df):
 
 
 def guardar_registro_y_limpiar(modelo, serie, condiciones, observaciones, fotos):
-    """Guarda el registro, guarda las imágenes físicamente y actualiza el archivo persistente."""
+    """Guarda el registro y limpia los campos (se ejecuta al añadir)."""
     
     if not modelo or not serie:
         st.error("❌ Los campos MODELO y SERIE son obligatorios.")
@@ -196,7 +194,7 @@ def guardar_registro_y_limpiar(modelo, serie, condiciones, observaciones, fotos)
 
     os.makedirs(IMAGE_FOLDER, exist_ok=True)
     
-    # Guardar las fotos físicamente y obtener la RUTA
+    # Lógica de guardado de fotos físicas
     fotos_rutas_guardadas = {}
     
     for k, uploaded_file in fotos.items():
@@ -241,10 +239,28 @@ def guardar_registro_y_limpiar(modelo, serie, condiciones, observaciones, fotos)
             st.session_state[key] = ""
             
     st.rerun()
+    
+# ----------------------------------------------------
+# 💥 FUNCIÓN PARA PROCESAR Y PREPARAR LA DESCARGA 💥
+# ----------------------------------------------------
 
-# ----------------------------------------------------
-# PUNTO DE ENTRADA Y DISEÑO DE LA INTERFAZ PRINCIPAL
-# ----------------------------------------------------
+def procesar_excel_para_descarga(df):
+    """Llama a la función de generación de Excel, guarda el archivo en el estado de sesión."""
+    
+    if df.empty:
+        st.error("No hay registros guardados para procesar.")
+        return None
+
+    with st.spinner('⏳ Procesando y formateando Excel con imágenes... Esto puede tardar unos segundos.'):
+        # La función generar_excel_con_formato hace el trabajo pesado de I/O y formato
+        excel_bytes = generar_excel_con_formato(df)
+        st.session_state['excel_listo'] = excel_bytes
+        st.success("✅ Procesamiento completado. Haga clic en el botón de descarga.")
+        
+    # Limpiamos el Garbage Collector después del proceso
+    gc.collect()
+
+
 def main():
     st.set_page_config(page_title="Electrolux Inspección", layout="wide")
 
@@ -270,16 +286,19 @@ def main():
     st.markdown("---") 
     
     if st.button("⚙️ Editar Formato de Columnas (Administración)", type="secondary"):
-        # Esto redirige a la página de administración
         st.write("<meta http-equiv='refresh' content='0; url=admin_columnas'>", unsafe_allow_html=True)
         
     st.markdown("---")
     
-    # --- RESTO DE LA LÓGICA DE LA PÁGINA ---
+    # --- LÓGICA DE INICIALIZACIÓN Y ESTADO ---
     if 'datos_ingresados' not in st.session_state:
         st.session_state['datos_ingresados'] = cargar_datos_persistentes()
     if 'limpiador_key' not in st.session_state:
         st.session_state['limpiador_key'] = 0
+    # 💥 NUEVO ESTADO: Bandera para el archivo Excel listo
+    if 'excel_listo' not in st.session_state:
+         st.session_state['excel_listo'] = None
+
 
     # Usamos st.form para agrupar los inputs
     with st.form(key='inspeccion_form'):
@@ -287,11 +306,14 @@ def main():
         st.markdown("<h3 style='color: #FFFFFF;'>--- Datos de Producto y Condición ---</h3>", unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         
-        # Modelo y Serie
+        # Inputs del formulario...
         modelo = col1.text_input("MODELO", key='input_modelo')
         serie = col2.text_input("SERIE", key='input_serie')
         
-        # Checkboxes
+        # ... (Checkboxes, Observaciones, File Uploaders) ...
+        # (código de formulario omitido por concisión, mantener la versión anterior)
+
+        # Re-inicialización de variables locales necesarias (Copiar de la versión anterior)
         condiciones = {}
         st.markdown("##### Condiciones de Inspección")
         cols = st.columns(4) 
@@ -300,18 +322,15 @@ def main():
             initial_value = st.session_state.get(clave_dinamica, False)
             condiciones[col] = cols[i % 4].checkbox(col, value=initial_value, key=clave_dinamica)
             
-        # Observaciones
         observaciones = st.text_area("OBSERVACIONES", key='input_observaciones')
-        
         st.markdown("---")
-
-        # File Uploaders
         st.markdown("<h3 style='color: #FFFFFF;'>📸 Fotos</h3>", unsafe_allow_html=True)
         fotos = {}
         cols_foto = st.columns(4)
         for i, col in enumerate(COLUMNAS_IMAGEN):
             clave_dinamica = f'file_{col}_{st.session_state["limpiador_key"]}'
             fotos[col] = cols_foto[i % 4].file_uploader(col, type=['png', 'jpg', 'jpeg'], key=clave_dinamica)
+
 
         st.markdown("---")
         
@@ -323,7 +342,7 @@ def main():
             args=(modelo, serie, condiciones, observaciones, fotos)
         )
 
-    # --- 5. Mostrar tabla de registros guardados y botón de descarga ---
+    # --- 5. Mostrar tabla de registros guardados y botón de DESCARGA ---
 
     if st.session_state['datos_ingresados']:
         df_preview = pd.DataFrame(st.session_state['datos_ingresados'])
@@ -331,14 +350,27 @@ def main():
         st.subheader(f"Registros Guardados ({len(st.session_state['datos_ingresados'])})")
         st.dataframe(df_preview[[c for c in ENCABEZADOS if c in df_preview.columns]], use_container_width=True, height=200)
 
-        excel_file = generar_excel_con_formato(df_preview)
+        st.markdown("---")
         
-        st.download_button(
-            label="💾 Descargar Excel Final",
-            data=excel_file.getvalue(),
-            file_name="Inspeccion_Reporte_Mobil.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        # 💥 BOTÓN DE PROCESAR (DISPARA LA CARGA PESADA) 💥
+        st.button(
+            label="⚙️ 1. Procesar y Generar Excel", 
+            type="primary",
+            # Llama a la función que inicia el procesamiento
+            on_click=procesar_excel_para_descarga, 
+            args=(df_preview,)
         )
+        
+        # 💥 BOTÓN DE DESCARGA (SOLO APARECE SI EL ARCHIVO ESTÁ LISTO) 💥
+        if st.session_state['excel_listo'] is not None:
+            st.download_button(
+                label="⬇️ 2. Descargar Excel Final",
+                data=st.session_state['excel_listo'].getvalue(),
+                file_name="Inspeccion_Reporte_Mobil.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                # Una vez descargado, limpiamos el estado para evitar re-descargas accidentales
+                on_click=lambda: st.session_state.update({'excel_listo': None})
+            )
 
         if st.button("🗑️ Limpiar Todos los Registros"):
             st.session_state['datos_ingresados'] = []
