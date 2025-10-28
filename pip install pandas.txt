@@ -1,0 +1,7 @@
+pip install streamlit
+pip install pandas
+pip install openpyxl
+pip install Pillow
+
+abrir
+python -m streamlit run app_movil.py

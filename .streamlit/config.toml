@@ -1,0 +1,16 @@
+[theme]
+# Color de acento para botones, enlaces y cuadros de selección
+primaryColor="#315488"        
+
+# FONDO PRINCIPAL: Azul muy oscuro de la interfaz (similar a #1C2533)
+backgroundColor="#1C2533"     
+
+# FONDO SECUNDARIO: Color de los cuadros de texto y sidebar
+secondaryBackgroundColor="#2A384F" 
+
+# Color del texto (blanco/claro para contraste)
+textColor="#EFEFEF"           
+font="sans serif"
+
+[client]
+showSidebarNavigation = false
