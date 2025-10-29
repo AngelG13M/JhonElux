@@ -231,7 +231,9 @@ def guardar_registro_y_limpiar(modelo, serie, condiciones, observaciones, fotos)
         
     st.success(f"✅ Registro para Modelo {modelo} añadido a la lista. Ingresa el siguiente.")
     
+    # Reiniciamos la key del formulario y la key del excel para limpiar y no guardar un excel "viejo"
     st.session_state['limpiador_key'] += 1 
+    st.session_state['excel_listo'] = None 
     
     keys_a_limpiar_texto = ['input_modelo', 'input_serie', 'input_observaciones']
     for key in keys_a_limpiar_texto:
@@ -241,24 +243,24 @@ def guardar_registro_y_limpiar(modelo, serie, condiciones, observaciones, fotos)
     st.rerun()
     
 # ----------------------------------------------------
-# 💥 FUNCIÓN ÚNICA DE PROCESAMIENTO Y DESCARGA 💥
+# 💥 FUNCIÓN PARA PROCESAR Y PREPARAR LA DESCARGA 💥
 # ----------------------------------------------------
 
-def get_excel_for_download():
-    """Genera el Excel solo cuando el botón de descarga es presionado."""
+def procesar_excel_para_descarga(df):
+    """Llama a la función de generación de Excel, guarda el archivo en el estado de sesión."""
     
-    if not st.session_state['datos_ingresados']:
-        # st.error("No hay registros guardados para procesar.") # No podemos mostrar st.error aquí
-        return b"" # Debe retornar bytes vacíos
-        
-    df = pd.DataFrame(st.session_state['datos_ingresados'])
-    
-    # El spinner se ejecuta mientras se genera el archivo
-    with st.spinner('⏳ Procesando y formateando Excel con imágenes... Esto puede tardar unos segundos.'):
-        excel_bytes_io = generar_excel_con_formato(df)
-        gc.collect() 
-        return excel_bytes_io.getvalue()
+    if df.empty:
+        st.error("No hay registros guardados para procesar.")
+        return None
 
+    # st.spinner solo funciona si no hay un st.rerun posterior, pero sí muestra el mensaje de espera
+    with st.spinner('⏳ Procesando y formateando Excel con imágenes... Esto puede tardar unos segundos. ¡No cierres el navegador!'):
+        excel_bytes = generar_excel_con_formato(df)
+        st.session_state['excel_listo'] = excel_bytes
+        
+    # Limpiamos el Garbage Collector después del proceso
+    gc.collect()
+    st.rerun() # Forzamos el rerun para que el botón de descarga se active
 
 # ----------------------------------------------------
 # PUNTO DE ENTRADA Y DISEÑO DE LA INTERFAZ PRINCIPAL
@@ -297,6 +299,9 @@ def main():
         st.session_state['datos_ingresados'] = cargar_datos_persistentes()
     if 'limpiador_key' not in st.session_state:
         st.session_state['limpiador_key'] = 0
+    # Bandera para el archivo Excel listo
+    if 'excel_listo' not in st.session_state:
+         st.session_state['excel_listo'] = None
 
 
     # Usamos st.form para agrupar los inputs
@@ -352,22 +357,41 @@ def main():
 
         st.markdown("---")
         
-        # 💥 BOTÓN ÚNICO: PROCESAR Y DESCARGAR 💥
-        # Llama a la función get_excel_for_download() al ser presionado.
-        st.download_button(
-            label="⚙️ Procesar y Descargar Excel Final",
-            data=get_excel_for_download(),
-            file_name="Inspeccion_Reporte_Mobil.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary"
-        )
+        col_proc, col_down = st.columns(2)
+
+        # BOTÓN 1: PROCESAR (INICIA EL TRABAJO PESADO y prepara la descarga)
+        if st.session_state['excel_listo'] is None:
+             col_proc.button(
+                label="⚙️ 1. Procesar para Descarga", 
+                type="primary",
+                on_click=procesar_excel_para_descarga, 
+                args=(df_preview,)
+            )
+        else:
+             col_proc.success("✅ Archivo listo. Continúe con el paso 2.")
         
+        # BOTÓN 2: DESCARGAR (SOLO APARECE SI EL ARCHIVO ESTÁ LISTO)
+        if st.session_state['excel_listo'] is not None:
+            col_down.download_button(
+                label="⬇️ 2. Descargar Excel Final",
+                data=st.session_state['excel_listo'].getvalue(),
+                file_name="Inspeccion_Reporte_Mobil.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                # Limpiamos el estado después de la descarga para forzar el reprocesamiento
+                on_click=lambda: st.session_state.update({'excel_listo': None}),
+                type="primary"
+            )
+        else:
+            col_down.button("⬇️ 2. Descargar Excel Final", disabled=True)
+
+
         st.markdown("---")
         
         # BOTÓN DE LIMPIAR (ÚNICA FORMA DE BORRAR LOS REGISTROS Y ARCHIVOS)
         if st.button("🗑️ Limpiar Todos los Registros"):
             st.session_state['datos_ingresados'] = []
             st.session_state['limpiador_key'] += 1 
+            st.session_state['excel_listo'] = None
             
             if os.path.exists(PERSISTENCE_FILE):
                  os.remove(PERSISTENCE_FILE)
