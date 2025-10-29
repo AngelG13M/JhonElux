@@ -1,0 +1,6 @@
+__pycache__
+*.pyc
+.git
+*.csv
+# Ignorar estas carpetas locales grandes
+imagenes_persistentes/
