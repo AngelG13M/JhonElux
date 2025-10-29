@@ -59,7 +59,7 @@ ALINEACION_CENTRO = Alignment(horizontal='center', vertical='center', wrap_text=
 RELLENO_VERDE_AZULADO = PatternFill(start_color='20B2AA', end_color='20B2AA', fill_type='solid') 
 FUENTE_ENCABEZADO = Font(color='FFFFFF', bold=True) 
 
-# --- 3. Funciones de Lógica y Persistencia (Sin cambios, pero ahora se llama bajo demanda) ---
+# --- 3. Funciones de Lógica y Persistencia ---
 
 def cargar_datos_persistentes():
     if os.path.exists(PERSISTENCE_FILE):
@@ -76,7 +76,8 @@ def cargar_datos_persistentes():
             
             return df.to_dict('records')
         except Exception as e:
-            st.error(f"Error al cargar datos persistentes: {e}. Se inicia una lista vacía.")
+            # En un reinicio, puede que el archivo exista pero esté dañado
+            st.warning(f"Advertencia: Error al cargar datos persistentes: {e}. Se inicia una lista vacía.")
             return []
     return []
 
@@ -225,6 +226,7 @@ def guardar_registro_y_limpiar(modelo, serie, condiciones, observaciones, fotos)
     # Persistencia: Guardar el registro a un archivo CSV (texto + rutas)
     try:
         df_actual = pd.DataFrame(st.session_state['datos_ingresados'])
+        # Aseguramos que solo se guarden las columnas válidas, incluyendo las de imagen
         df_actual[[c for c in COLUMNAS_FINALES if c in df_actual.columns]].to_csv(PERSISTENCE_FILE, index=False)
     except Exception as e:
         st.warning(f"Advertencia: No se pudo guardar el archivo de persistencia CSV. Error: {e}")
@@ -241,7 +243,7 @@ def guardar_registro_y_limpiar(modelo, serie, condiciones, observaciones, fotos)
     st.rerun()
     
 # ----------------------------------------------------
-# 💥 FUNCIÓN PARA PROCESAR Y PREPARAR LA DESCARGA 💥
+# FUNCIÓN PARA PROCESAR Y PREPARAR LA DESCARGA 
 # ----------------------------------------------------
 
 def procesar_excel_para_descarga(df):
@@ -251,16 +253,17 @@ def procesar_excel_para_descarga(df):
         st.error("No hay registros guardados para procesar.")
         return None
 
+    # st.spinner solo funciona si no hay un st.rerun posterior, pero sí muestra el mensaje de espera
     with st.spinner('⏳ Procesando y formateando Excel con imágenes... Esto puede tardar unos segundos.'):
-        # La función generar_excel_con_formato hace el trabajo pesado de I/O y formato
         excel_bytes = generar_excel_con_formato(df)
         st.session_state['excel_listo'] = excel_bytes
-        st.success("✅ Procesamiento completado. Haga clic en el botón de descarga.")
+        # st.success("✅ Procesamiento completado. Haga clic en el botón de descarga.")
         
-    # Limpiamos el Garbage Collector después del proceso
-    gc.collect()
+    st.rerun() # Forzamos el rerun para que aparezca el botón de descarga
 
-
+# ----------------------------------------------------
+# PUNTO DE ENTRADA Y DISEÑO DE LA INTERFAZ PRINCIPAL
+# ----------------------------------------------------
 def main():
     st.set_page_config(page_title="Electrolux Inspección", layout="wide")
 
@@ -295,7 +298,6 @@ def main():
         st.session_state['datos_ingresados'] = cargar_datos_persistentes()
     if 'limpiador_key' not in st.session_state:
         st.session_state['limpiador_key'] = 0
-    # 💥 NUEVO ESTADO: Bandera para el archivo Excel listo
     if 'excel_listo' not in st.session_state:
          st.session_state['excel_listo'] = None
 
@@ -306,14 +308,11 @@ def main():
         st.markdown("<h3 style='color: #FFFFFF;'>--- Datos de Producto y Condición ---</h3>", unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         
-        # Inputs del formulario...
+        # Inputs del formulario
         modelo = col1.text_input("MODELO", key='input_modelo')
         serie = col2.text_input("SERIE", key='input_serie')
         
-        # ... (Checkboxes, Observaciones, File Uploaders) ...
-        # (código de formulario omitido por concisión, mantener la versión anterior)
-
-        # Re-inicialización de variables locales necesarias (Copiar de la versión anterior)
+        # Checkboxes
         condiciones = {}
         st.markdown("##### Condiciones de Inspección")
         cols = st.columns(4) 
@@ -322,8 +321,12 @@ def main():
             initial_value = st.session_state.get(clave_dinamica, False)
             condiciones[col] = cols[i % 4].checkbox(col, value=initial_value, key=clave_dinamica)
             
+        # Observaciones
         observaciones = st.text_area("OBSERVACIONES", key='input_observaciones')
+        
         st.markdown("---")
+
+        # File Uploaders
         st.markdown("<h3 style='color: #FFFFFF;'>📸 Fotos</h3>", unsafe_allow_html=True)
         fotos = {}
         cols_foto = st.columns(4)
@@ -348,30 +351,37 @@ def main():
         df_preview = pd.DataFrame(st.session_state['datos_ingresados'])
         
         st.subheader(f"Registros Guardados ({len(st.session_state['datos_ingresados'])})")
+        # Mostramos solo las columnas de texto para que la tabla sea legible
         st.dataframe(df_preview[[c for c in ENCABEZADOS if c in df_preview.columns]], use_container_width=True, height=200)
 
         st.markdown("---")
         
-        # 💥 BOTÓN DE PROCESAR (DISPARA LA CARGA PESADA) 💥
+        # 💥 BOTÓN 1: PROCESAR (INICIA EL TRABAJO PESADO Y GUARDA LOS BYTES EN SESIÓN) 💥
         st.button(
-            label="⚙️ 1. Procesar y Generar Excel", 
+            label="⚙️ 1. Procesar Excel (Prepara la descarga)", 
             type="primary",
-            # Llama a la función que inicia el procesamiento
             on_click=procesar_excel_para_descarga, 
             args=(df_preview,)
         )
         
-        # 💥 BOTÓN DE DESCARGA (SOLO APARECE SI EL ARCHIVO ESTÁ LISTO) 💥
+        # 💥 BOTÓN 2: DESCARGAR (SOLO APARECE SI EL ARCHIVO ESTÁ LISTO) 💥
         if st.session_state['excel_listo'] is not None:
+            st.success("✅ Procesamiento completado. Haga clic en el botón de descarga.")
             st.download_button(
-                label="⬇️ 2. Descargar Excel Final",
+                label="⬇️ 2. Descargar Excel (¡Listo!)",
                 data=st.session_state['excel_listo'].getvalue(),
                 file_name="Inspeccion_Reporte_Mobil.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                # Una vez descargado, limpiamos el estado para evitar re-descargas accidentales
-                on_click=lambda: st.session_state.update({'excel_listo': None})
+                # Limpiamos el estado después de la descarga para forzar el reprocesamiento
+                on_click=lambda: st.session_state.update({'excel_listo': None}) 
             )
 
+        st.markdown("---")
+        
+        # MENSAJE DE ADVERTENCIA SOBRE PERSISTENCIA DE REGISTROS
+        st.warning("🚨 **IMPORTANTE:** Sus registros se guardan en `datos_maestro.csv`. El código **NUNCA** los borra, excepto al presionar el botón de Limpiar. Si se pierden al reiniciar la app, es porque el hosting gratuito de Render elimina los archivos guardados al suspender el servicio.")
+
+        # BOTÓN DE LIMPIAR (ÚNICA FORMA DE BORRAR LOS REGISTROS Y ARCHIVOS)
         if st.button("🗑️ Limpiar Todos los Registros"):
             st.session_state['datos_ingresados'] = []
             st.session_state['limpiador_key'] += 1 
